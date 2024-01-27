@@ -1,6 +1,9 @@
 import NutritionCalculator as NC
 import pandas as pd
 import glob
+import pandas as pd
+import numpy as np
+from scipy.optimize import minimize
 
 class FoodScorer:
     def __init__(self, gender, height, weight, state, PDk, eGFR, uACR, protein_loss, albumin, FBG, OGTT, HbA1c, TG, LDL, SBP, DBP, CK, CP, CCa, mealtype, foodtype, top_n):
@@ -11,11 +14,11 @@ class FoodScorer:
         self.foodtype = foodtype
         self.top_n=top_n
         self.Ncalc = NC.NutritionCalculator(gender, height, weight, state, PDk, eGFR, uACR, protein_loss, albumin, FBG, OGTT, HbA1c, TG, LDL, SBP, DBP, CK, CP, CCa)
-    
+
     def import_diet(self, mealtype, foodtype):
         EER, _, _, _, _, _, _, _, _, _, _ = self.Ncalc.calculate_meal_nutrient_criteria(mealtype)
-        resulting_diet = []
-        total_nutrition = []
+        resulting_diets = []
+        total_nutritions = []
 
         if mealtype == '식단':
             name = 'diet'
@@ -32,21 +35,18 @@ class FoodScorer:
         a='d' if foodtype == '음식' else 'p'
         
         file_list = glob.glob(f'food_DB/processed_DB/{name}/{name}{a}*.txt')
-        for file in file_list[:10]:
+        for file in file_list[:1]:
             with open(file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
                 i = 0
-                while i < len(lines)-11:
+                while i < len(lines)-2:
                     diet = eval("["+lines[i].strip().split(": ")[1].replace("(","").replace(")","")+"]")
-                    nutritions=[]
-                    for j in range(1,9):
-                        nutrition = float(lines[i+j].split(" ")[-1].replace("\n",""))
-                        nutritions.append(nutrition)
-                    if EER*0.5 <= nutritions[0] <= EER*1.5:
-                        resulting_diet.append(diet)
-                        total_nutrition.append(nutritions)
-                    i += 11
-        return resulting_diet, total_nutrition
+                    nutritions= lines[i+1]
+
+                    resulting_diets.append(diet)
+                    total_nutritions.append(nutritions)
+                    i += 3
+        return resulting_diets, total_nutritions
 
     def diet_scoring(self, total_nutrition, mealtype):
         EER, CHOA, CHOB, ProA, ProB, FatA, FatB, Na, K, P, Sugar = self.Ncalc.calculate_meal_nutrient_criteria(mealtype)
@@ -91,7 +91,33 @@ class FoodScorer:
         Total_score = 75+CHOS+ProS+FatS+NaS+SugarS+KS+PS
         
         return CHOS,ProS,FatS,NaS,SugarS,KS,PS,Total_score
-    
+
+    def optimize_size(self, food, total_nutrition):
+        nutrition_data = pd.DataFrame(eval(total_nutrition), columns=['에너지(kcal)', '탄수화물(g)', '단백질(g)', '지방(g)', '나트륨(mg)', '당류(g)', '칼륨(mg)', '인(mg)'])
+        def objective_function(weights, nutrition_data):
+            modified_nutrition = nutrition_data.copy()
+            for i, weight in enumerate(weights):
+                modified_nutrition.iloc[i] *= weight
+            total_nutrition = modified_nutrition.fillna(0).sum(axis=0).values.tolist()
+            return -1 * self.diet_scoring(total_nutrition, self.mealtype)[-1]  
+        
+        initial_guess = np.random.uniform(0.5, 1.5, 5)
+        bounds = [(0.5, 1.5)] * 5
+        optimal_weights = minimize(objective_function, initial_guess, args=(nutrition_data,), bounds=bounds).x
+
+        optimalized_nutrition_data = nutrition_data.copy()
+        for i, weight in enumerate(optimal_weights):
+            optimalized_nutrition_data.iloc[i] *= weight
+        summed_nutrition = optimalized_nutrition_data.fillna(0).sum(axis=0)
+        CHOS,ProS,FatS,NaS,SugarS,KS,PS,diet_score = self.diet_scoring(summed_nutrition, self.mealtype)
+        
+        total_nutritionss = summed_nutrition.values.tolist()
+
+        for j in range(len(optimal_weights)):
+            food[j][0] = str(round(float(food[j][0]) * optimal_weights[j], 1))
+        
+        return food, total_nutritionss, CHOS,ProS,FatS,NaS,SugarS,KS,PS,diet_score
+
     def top_diets(self):
         resulting_diets, total_nutritions = self.import_diet(self.mealtype, self.foodtype) # type: ignore
         diet_scores = []
@@ -100,8 +126,9 @@ class FoodScorer:
             resulting_diet = resulting_diets[i]
             if self.mealtype == '메인반찬':
                 resulting_diet = resulting_diets[i][0]
-            CHOS,ProS,FatS,NaS,SugarS,KS,PS,diet_score = self.diet_scoring(total_nutrition, self.mealtype)
-            diet_scores.append((resulting_diet, total_nutrition[0],total_nutrition[1],total_nutrition[2],total_nutrition[3],total_nutrition[4],total_nutrition[5], total_nutrition[6],total_nutrition[7],
+                
+            food, nutritions, CHOS,ProS,FatS,NaS,SugarS,KS,PS,diet_score = self.optimize_size(resulting_diet, total_nutrition)
+            diet_scores.append((food, nutritions[0],nutritions[1],nutritions[2],nutritions[3],nutritions[4],nutritions[5], nutritions[6],nutritions[7],
                                 CHOS,ProS,FatS,NaS,SugarS,KS,PS,diet_score))
 
         top_diets = sorted(diet_scores, key=lambda x: x[16], reverse=True)

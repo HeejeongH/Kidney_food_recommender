@@ -108,7 +108,7 @@ with tab3:
 
     meal = st.selectbox('어떤 종류의 음식을 원하시나요?', ('식단', '단품요리', '간식'))
     st.session_state.mealtype = meal
-    food = st.selectbox('직접 요리해드실건가요?', ('음식')) #, '가공식품'
+    food = st.selectbox('직접 요리해드실건가요?', ('음식', '가공식품'))
     st.session_state.foodtype = food
     top_n = 10
     
