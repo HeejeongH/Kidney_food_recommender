@@ -21,7 +21,7 @@ class FoodScorer:
         total_nutritions = []
 
         if mealtype == '식단':
-            name = 'diet'
+            name = 'diet_n'
         elif mealtype == '메인반찬':
             name = 'main'
         elif mealtype == '단품요리':
